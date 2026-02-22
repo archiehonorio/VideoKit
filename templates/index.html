@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>VideoKit — Video Downloader</title>
+  <title>VidPull — Video Downloader</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
@@ -13,7 +13,7 @@
       --bg:       #08090a;
       --surface:  #111214;
       --border:   #1e2024;
-      --accent:   #dd7825;
+      --accent:   #81ff47;
       --accent2:  #47d9ff;
       --text:     #f0f0f0;
       --muted:    #5a5e68;
@@ -139,6 +139,54 @@
     }
     input[type="url"]:focus { border-color: var(--accent); }
     input[type="url"]::placeholder { color: var(--muted); }
+
+    /* ── Cookies section ── */
+    .cookies-section {
+      margin-bottom: 24px;
+      padding: 16px 18px;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+    }
+    .cookies-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .cookies-info { display: flex; flex-direction: column; gap: 3px; }
+    .cookies-label {
+      font-size: .82rem; font-weight: 700; color: var(--text);
+    }
+    .cookies-status {
+      font-family: 'DM Mono', monospace; font-size: .72rem; color: var(--muted);
+    }
+    .cookies-status.active { color: var(--success); }
+    .btn-cookies {
+      padding: 8px 16px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'DM Mono', monospace;
+      font-size: .75rem;
+      color: var(--accent2);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: border-color .18s, color .18s;
+      flex-shrink: 0;
+    }
+    .btn-cookies:hover { border-color: var(--accent2); }
+    .cookies-hint {
+      margin-top: 10px;
+      font-family: 'DM Mono', monospace;
+      font-size: .72rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .cookies-hint a { color: var(--accent2); }
+    .cookies-success {
+      margin-top: 10px;
+      font-family: 'DM Mono', monospace;
+      font-size: .76rem;
+      color: var(--success);
+    }
 
     /* ── Quality Pills ── */
     .quality-section { margin-bottom: 28px; }
@@ -380,6 +428,27 @@
       </div>
     </div>
 
+    <!-- Cookies upload -->
+    <div class="cookies-section">
+      <div class="cookies-row">
+        <div class="cookies-info">
+          <span class="cookies-label">🍪 Browser Cookies</span>
+          <span class="cookies-status" id="cookies-status">Not uploaded</span>
+        </div>
+        <label class="btn-cookies" for="cookies-input" title="Upload cookies.txt for YouTube/Instagram/Facebook auth">
+          Upload cookies.txt
+          <input type="file" id="cookies-input" accept=".txt" style="display:none" />
+        </label>
+      </div>
+      <p class="cookies-hint" id="cookies-hint">
+        Required for YouTube (bot detection), private Instagram/Facebook videos.
+        <a href="https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp" target="_blank">How to export →</a>
+      </p>
+      <div class="cookies-success" id="cookies-success" style="display:none">
+        ✅ Cookies active — YouTube &amp; private videos should now work.
+      </div>
+    </div>
+
     <!-- Download button -->
     <button class="btn-dl" id="btn-start">
       <div class="btn-inner">
@@ -420,7 +489,7 @@
 </div>
 
 <footer>
-  Powered by <a href="https://github.com/yt-dlp/yt-dlp" target="_blank">yt-dlp</a> · VideoKit
+  Powered by <a href="https://github.com/yt-dlp/yt-dlp" target="_blank">yt-dlp</a> · VidPull
 </footer>
 
 <script>
@@ -565,7 +634,51 @@
     }
   });
 
-  // Allow Enter key in input
+  // ── Cookies upload ────────────────────────────────────────────────────────
+  async function checkCookiesStatus() {
+    try {
+      const res = await fetch('/api/cookies-status');
+      const data = await res.json();
+      const statusEl = document.getElementById('cookies-status');
+      const successEl = document.getElementById('cookies-success');
+      const hintEl = document.getElementById('cookies-hint');
+      if (data.has_cookies) {
+        statusEl.textContent = 'Active ✓';
+        statusEl.classList.add('active');
+        successEl.style.display = 'block';
+        hintEl.style.display = 'none';
+      } else {
+        statusEl.textContent = 'Not uploaded';
+        statusEl.classList.remove('active');
+      }
+    } catch (e) {}
+  }
+
+  document.getElementById('cookies-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('cookies', file);
+    const statusEl = document.getElementById('cookies-status');
+    statusEl.textContent = 'Uploading...';
+    try {
+      const res = await fetch('/api/upload-cookies', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (res.ok) {
+        checkCookiesStatus();
+      } else {
+        statusEl.textContent = 'Error: ' + (data.error || 'Upload failed');
+        statusEl.style.color = 'var(--error)';
+      }
+    } catch (err) {
+      statusEl.textContent = 'Upload failed';
+    }
+    e.target.value = ''; // reset input
+  });
+
+  // Check cookies status on load
+  checkCookiesStatus();
+
   document.getElementById('url-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('btn-start').click();
   });

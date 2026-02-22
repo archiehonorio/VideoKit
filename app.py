@@ -22,6 +22,9 @@ YT_DLP = [sys.executable, "-m", "yt_dlp"]
 jobs = {}
 jobs_lock = threading.Lock()
 
+# Path to optional cookies file (upload via /api/upload-cookies)
+COOKIES_FILE = Path(__file__).parent / "cookies.txt"
+
 QUALITY_PRESETS = {
     "4k":    {
         "label": "2160p 4K",
@@ -68,6 +71,29 @@ def log(job_id, msg):
         jobs[job_id]["logs"].append(msg)
 
 
+def friendly_error(stderr: str, site: str) -> str:
+    """Convert yt-dlp error messages into user-friendly explanations."""
+    s = stderr.lower()
+    if "sign in" in s or "bot" in s or "cookies" in s:
+        return (
+            f"⛔ {site} is blocking server downloads (bot detection). "
+            "Fix: Upload your browser cookies using the 🍪 Cookies button above."
+        )
+    if "private" in s or "login required" in s or "members only" in s:
+        return f"🔒 This {site} video is private or requires login. Upload cookies to fix this."
+    if "not available" in s or "unavailable" in s:
+        return "🚫 This video is unavailable in the server's region or has been removed."
+    if "unsupported url" in s or "no video formats" in s:
+        return "❓ Unsupported URL. Make sure it's a direct link to a video page."
+    if "http error 429" in s or "too many requests" in s:
+        return "⏳ Rate limited by the site. Wait a few minutes and try again."
+    if "http error 403" in s:
+        return f"🚫 {site} blocked the request (403). Try uploading cookies."
+    if "network" in s or "connect" in s or "timeout" in s:
+        return "🌐 Network error reaching the site. Try again in a moment."
+    return None  # fall through to raw error
+
+
 def run_download(job_id, url, quality_key):
     preset = QUALITY_PRESETS.get(quality_key, QUALITY_PRESETS["best"])
     audio_only = preset.get("audio_only", False)
@@ -78,34 +104,57 @@ def run_download(job_id, url, quality_key):
     log(job_id, f"📡 Connecting to {site}...")
 
     tmpdir = tempfile.mkdtemp()
+    output_template = os.path.join(tmpdir, "%(title)s.%(ext)s")
 
+    # ── Base flags ─────────────────────────────────────────────────────────────
+    base_flags = [
+        "--no-playlist",
+        "--no-warnings",
+        "--socket-timeout", "30",
+        "--retries", "3",
+        # Rotate through user agents to reduce bot detection
+        "--user-agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ]
+
+    # ── Cookies (helps with YouTube, Instagram, Facebook auth) ────────────────
+    if COOKIES_FILE.exists():
+        base_flags += ["--cookies", str(COOKIES_FILE)]
+        log(job_id, "🍪 Using saved cookies")
+
+    # ── YouTube-specific: use PO token workaround via web client ──────────────
+    is_youtube = "youtube.com" in url or "youtu.be" in url
+    if is_youtube:
+        base_flags += [
+            "--extractor-args", "youtube:player_client=web,mweb",
+        ]
+
+    # ── Facebook / Instagram need extra headers ────────────────────────────────
+    if any(s in url for s in ["instagram.com", "facebook.com", "fb.watch"]):
+        base_flags += [
+            "--add-header", "Accept-Language:en-US,en;q=0.9",
+            "--add-header", "Referer:https://www.google.com/",
+        ]
+
+    # ── Build command ──────────────────────────────────────────────────────────
     if audio_only:
-        output_template = os.path.join(tmpdir, "%(title)s.%(ext)s")
         cmd = YT_DLP + [
             "--format", preset["format"],
             "--output", output_template,
-            "--no-playlist",
             "--extract-audio",
             "--audio-format", "mp3",
             "--audio-quality", "192K",
-            "--no-warnings",
-        ]
+        ] + base_flags
     else:
-        output_template = os.path.join(tmpdir, "%(title)s.%(ext)s")
         cmd = YT_DLP + [
             "--format", preset["format"],
             "--output", output_template,
             "--merge-output-format", "mp4",
-            "--no-playlist",
-            "--no-warnings",
-        ]
-
-    if any(s in url for s in ["instagram.com", "facebook.com", "fb.watch"]):
-        cmd += ["--add-header", "User-Agent:Mozilla/5.0"]
+        ] + base_flags
 
     cmd.append(url)
-
-    log(job_id, f"⬇️  Downloading...")
+    log(job_id, "⬇️  Downloading...")
 
     try:
         proc = subprocess.run(
@@ -113,25 +162,33 @@ def run_download(job_id, url, quality_key):
         )
 
         if proc.returncode != 0:
-            err = proc.stderr.strip().splitlines()
-            for line in err[-5:]:
-                if line.strip():
-                    log(job_id, f"⚠️  {line.strip()}")
-            log(job_id, "❌ Download failed. Check the URL and try again.")
+            stderr = proc.stderr.strip()
+            friendly = friendly_error(stderr, site)
+
+            if friendly:
+                log(job_id, friendly)
+            else:
+                # Show last few raw lines as fallback
+                for line in stderr.splitlines()[-4:]:
+                    if line.strip() and not line.startswith("WARNING"):
+                        log(job_id, f"⚠️  {line.strip()}")
+
+            log(job_id, "❌ Download failed.")
             with jobs_lock:
                 jobs[job_id]["status"] = "error"
             return
 
-        # Find the downloaded file
-        files = list(Path(tmpdir).iterdir())
+        # ── Find the downloaded file ───────────────────────────────────────────
+        files = [f for f in Path(tmpdir).iterdir() if f.is_file()]
         if not files:
-            log(job_id, "❌ No file was created.")
+            log(job_id, "❌ No file was created — the site may have blocked the download.")
             with jobs_lock:
                 jobs[job_id]["status"] = "error"
             return
 
-        filepath = files[0]
-        log(job_id, f"✅ Done! Ready to download: {filepath.name}")
+        # Pick the largest file (in case of .part leftovers)
+        filepath = max(files, key=lambda f: f.stat().st_size)
+        log(job_id, f"✅ Done! Ready to save: {filepath.name}")
 
         with jobs_lock:
             jobs[job_id]["status"] = "done"
@@ -139,11 +196,11 @@ def run_download(job_id, url, quality_key):
             jobs[job_id]["filename"] = filepath.name
 
     except subprocess.TimeoutExpired:
-        log(job_id, "❌ Timed out after 10 minutes.")
+        log(job_id, "❌ Timed out after 10 minutes. The file may be too large or the server too slow.")
         with jobs_lock:
             jobs[job_id]["status"] = "error"
     except Exception as e:
-        log(job_id, f"❌ Error: {str(e)}")
+        log(job_id, f"❌ Unexpected error: {str(e)}")
         with jobs_lock:
             jobs[job_id]["status"] = "error"
 
@@ -153,6 +210,25 @@ def run_download(job_id, url, quality_key):
 @app.route("/")
 def index():
     return render_template("index.html", presets=QUALITY_PRESETS)
+
+
+@app.route("/api/upload-cookies", methods=["POST"])
+def upload_cookies():
+    """Accept a Netscape-format cookies.txt and save it for yt-dlp to use."""
+    f = request.files.get("cookies")
+    if not f:
+        return jsonify({"error": "No file uploaded"}), 400
+    content = f.read().decode("utf-8", errors="ignore")
+    # Basic sanity check — Netscape cookies start with a comment line
+    if "HTTP Cookie File" not in content and "Netscape HTTP" not in content and "# " not in content[:200]:
+        return jsonify({"error": "Doesn't look like a valid Netscape cookies.txt file"}), 400
+    COOKIES_FILE.write_text(content, encoding="utf-8")
+    return jsonify({"ok": True, "message": "Cookies saved! Downloads will now use them."})
+
+
+@app.route("/api/cookies-status")
+def cookies_status():
+    return jsonify({"has_cookies": COOKIES_FILE.exists()})
 
 
 @app.route("/api/start", methods=["POST"])
