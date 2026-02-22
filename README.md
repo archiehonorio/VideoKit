@@ -1,4 +1,4 @@
-# 🎬 VidPull — Batch Video Downloader (Web App)
+# 🎬 VideoKit — Batch Video Downloader (Web App)
 
 Download videos from YouTube, TikTok, Instagram, Facebook, Twitter/X, Vimeo, Reddit, and 1000+ more sites — straight from your browser.
 
