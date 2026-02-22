@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>VideoKit — Video Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #08090a;
+      --surface:  #111214;
+      --border:   #1e2024;
+      --accent:   #dd7825;
+      --accent2:  #47d9ff;
+      --text:     #f0f0f0;
+      --muted:    #5a5e68;
+      --error:    #ff5f6d;
+      --success:  #47ff9a;
+      --radius:   14px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 40px 20px 80px;
+      overflow-x: hidden;
+    }
+
+    /* ── Background grain + glow ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 70% 10%, rgba(232,255,71,.07) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 40% at 20% 80%, rgba(71,217,255,.05) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none; opacity: .5;
+    }
+
+    .wrap { position: relative; z-index: 1; width: 100%; max-width: 680px; }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+      animation: fadeUp .6s ease both;
+    }
+    .logo-row {
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      margin-bottom: 8px;
+    }
+    .logo-icon {
+      width: 44px; height: 44px;
+      background: var(--accent);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+    }
+    h1 {
+      font-size: clamp(2rem, 6vw, 3.2rem);
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1;
+    }
+    h1 span { color: var(--accent); }
+    .tagline {
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+      font-size: .82rem;
+      letter-spacing: .08em;
+      margin-top: 10px;
+    }
+    .supported-sites {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+      margin-top: 20px;
+    }
+    .site-badge {
+      padding: 4px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      font-size: .74rem;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      margin-bottom: 20px;
+      animation: fadeUp .6s .1s ease both;
+    }
+
+    /* ── URL Input ── */
+    .input-group {
+      display: flex; flex-direction: column; gap: 8px;
+      margin-bottom: 24px;
+    }
+    label {
+      font-size: .8rem;
+      font-family: 'DM Mono', monospace;
+      color: var(--muted);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .url-row {
+      display: flex; gap: 10px;
+    }
+    input[type="url"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: .9rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input[type="url"]:focus { border-color: var(--accent); }
+    input[type="url"]::placeholder { color: var(--muted); }
+
+    /* ── Quality Pills ── */
+    .quality-section { margin-bottom: 28px; }
+    .quality-grid {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+    }
+    .q-pill {
+      padding: 8px 18px;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 99px;
+      font-family: 'DM Mono', monospace;
+      font-size: .8rem;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all .18s;
+      user-select: none;
+    }
+    .q-pill:hover { border-color: var(--accent); color: var(--accent); }
+    .q-pill.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #08090a;
+      font-weight: 600;
+    }
+
+    /* ── Button ── */
+    .btn-dl {
+      width: 100%;
+      padding: 16px;
+      background: var(--accent);
+      color: #08090a;
+      border: none;
+      border-radius: 10px;
+      font-family: 'Syne', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: .02em;
+      transition: transform .15s, opacity .15s, box-shadow .15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn-dl:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(232,255,71,.25);
+    }
+    .btn-dl:active:not(:disabled) { transform: translateY(0); }
+    .btn-dl:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-dl .btn-inner {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+    }
+
+    /* ── Terminal log ── */
+    .terminal {
+      display: none;
+      background: #0b0c0e;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      animation: fadeUp .4s ease both;
+    }
+    .terminal.visible { display: block; }
+    .terminal-header {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 16px;
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #febc2e; }
+    .dot-g { background: #28c840; }
+    .terminal-title {
+      font-family: 'DM Mono', monospace;
+      font-size: .75rem;
+      color: var(--muted);
+      margin-left: 4px;
+    }
+    #log-output {
+      font-family: 'DM Mono', monospace;
+      font-size: .82rem;
+      line-height: 1.8;
+      color: #a8b0c0;
+      min-height: 60px;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    #log-output .log-line { display: block; }
+    .log-done   { color: var(--success); }
+    .log-error  { color: var(--error); }
+    .log-info   { color: var(--accent2); }
+
+    /* ── Download ready banner ── */
+    .dl-ready {
+      display: none;
+      margin-top: 20px;
+      background: linear-gradient(135deg, rgba(71,255,154,.08), rgba(71,255,154,.03));
+      border: 1px solid rgba(71,255,154,.25);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      animation: fadeUp .4s ease both;
+    }
+    .dl-ready.visible { display: flex; align-items: center; gap: 16px; }
+    .dl-ready-text { flex: 1; }
+    .dl-ready-text strong { display: block; color: var(--success); margin-bottom: 4px; }
+    .dl-ready-text span {
+      font-family: 'DM Mono', monospace;
+      font-size: .78rem;
+      color: var(--muted);
+    }
+    .btn-get {
+      padding: 12px 24px;
+      background: var(--success);
+      color: #08090a;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: .9rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: transform .15s, box-shadow .15s;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-get:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(71,255,154,.3); }
+
+    /* ── Error banner ── */
+    .error-banner {
+      display: none;
+      margin-top: 16px;
+      padding: 14px 20px;
+      background: rgba(255,95,109,.08);
+      border: 1px solid rgba(255,95,109,.25);
+      border-radius: 10px;
+      font-family: 'DM Mono', monospace;
+      font-size: .82rem;
+      color: var(--error);
+    }
+    .error-banner.visible { display: block; }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(8,9,10,.4);
+      border-top-color: #08090a;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: none;
+    }
+    .spinner.visible { display: block; }
+
+    /* ── Progress bar ── */
+    .progress-bar-wrap {
+      height: 3px; background: var(--border); border-radius: 99px;
+      margin-top: 16px; overflow: hidden; display: none;
+    }
+    .progress-bar-wrap.visible { display: block; }
+    .progress-bar {
+      height: 100%; background: var(--accent);
+      border-radius: 99px;
+      width: 0%;
+      transition: width .4s ease;
+      animation: indeterminate 1.6s ease infinite;
+    }
+    @keyframes indeterminate {
+      0%   { width: 0%;   margin-left: 0; }
+      50%  { width: 60%;  margin-left: 20%; }
+      100% { width: 0%;   margin-left: 100%; }
+    }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 48px;
+      text-align: center;
+      font-family: 'DM Mono', monospace;
+      font-size: .72rem;
+      color: var(--muted);
+      animation: fadeUp .6s .3s ease both;
+    }
+    footer a { color: var(--muted); }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* scrollbar */
+    #log-output::-webkit-scrollbar { width: 4px; }
+    #log-output::-webkit-scrollbar-track { background: transparent; }
+    #log-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+    @media (max-width: 480px) {
+      .card { padding: 24px 20px; }
+      .url-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <header>
+    <div class="logo-row">
+      <div class="logo-icon">▶</div>
+      <h1>Vid<span>Pull</span></h1>
+    </div>
+    <p class="tagline">// paste link → pick quality → download</p>
+    <div class="supported-sites">
+      <span class="site-badge">YouTube</span>
+      <span class="site-badge">TikTok</span>
+      <span class="site-badge">Instagram</span>
+      <span class="site-badge">Facebook</span>
+      <span class="site-badge">Twitter/X</span>
+      <span class="site-badge">Vimeo</span>
+      <span class="site-badge">Reddit</span>
+      <span class="site-badge">+1000 more</span>
+    </div>
+  </header>
+
+  <!-- Main card -->
+  <div class="card">
+
+    <!-- URL -->
+    <div class="input-group">
+      <label for="url-input">Video URL</label>
+      <div class="url-row">
+        <input type="url" id="url-input" placeholder="https://youtube.com/watch?v=..." autocomplete="off" />
+      </div>
+    </div>
+
+    <!-- Quality -->
+    <div class="quality-section">
+      <label>Quality</label>
+      <div class="quality-grid" id="quality-grid">
+        {% for key, preset in presets.items() %}
+        <div class="q-pill {% if key == 'best' %}active{% endif %}" data-key="{{ key }}">{{ preset.label }}</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Download button -->
+    <button class="btn-dl" id="btn-start">
+      <div class="btn-inner">
+        <span class="spinner" id="btn-spinner"></span>
+        <span id="btn-text">⬇ Download</span>
+      </div>
+    </button>
+
+    <!-- Progress bar -->
+    <div class="progress-bar-wrap" id="progress-wrap">
+      <div class="progress-bar"></div>
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div class="terminal" id="terminal">
+    <div class="terminal-header">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+      <span class="terminal-title">download log</span>
+    </div>
+    <div id="log-output"></div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-banner" id="error-banner"></div>
+
+  <!-- Download ready -->
+  <div class="dl-ready" id="dl-ready">
+    <div class="dl-ready-text">
+      <strong>✅ Ready to save!</strong>
+      <span id="dl-filename">—</span>
+    </div>
+    <a class="btn-get" id="btn-get" href="#">Save File</a>
+  </div>
+
+</div>
+
+<footer>
+  Powered by <a href="https://github.com/yt-dlp/yt-dlp" target="_blank">yt-dlp</a> · VideoKit
+</footer>
+
+<script>
+  let selectedQuality = 'best';
+  let pollingTimer = null;
+  let currentJobId = null;
+
+  // ── Quality pills ──────────────────────────────────────────────────────────
+  document.querySelectorAll('.q-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.q-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      selectedQuality = pill.dataset.key;
+    });
+  });
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function setLoading(on) {
+    const btn = document.getElementById('btn-start');
+    const spinner = document.getElementById('btn-spinner');
+    const txt = document.getElementById('btn-text');
+    const progress = document.getElementById('progress-wrap');
+
+    btn.disabled = on;
+    spinner.classList.toggle('visible', on);
+    txt.textContent = on ? 'Downloading...' : '⬇ Download';
+    progress.classList.toggle('visible', on);
+  }
+
+  function showTerminal() {
+    document.getElementById('terminal').classList.add('visible');
+  }
+
+  function appendLog(msg) {
+    const out = document.getElementById('log-output');
+    const line = document.createElement('span');
+    line.classList.add('log-line');
+
+    if (msg.startsWith('✅') || msg.startsWith('🎉')) line.classList.add('log-done');
+    else if (msg.startsWith('❌') || msg.startsWith('⚠️')) line.classList.add('log-error');
+    else if (msg.startsWith('🔍') || msg.startsWith('📡') || msg.startsWith('⚙️')) line.classList.add('log-info');
+
+    line.textContent = msg;
+    out.appendChild(line);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-banner');
+    el.textContent = '⚠️  ' + msg;
+    el.classList.add('visible');
+  }
+
+  function hideError() {
+    document.getElementById('error-banner').classList.remove('visible');
+  }
+
+  function showDownloadReady(jobId, filename) {
+    const ready = document.getElementById('dl-ready');
+    const fname = document.getElementById('dl-filename');
+    const link = document.getElementById('btn-get');
+
+    fname.textContent = filename;
+    link.href = `/api/download/${jobId}`;
+    link.setAttribute('download', filename);
+    ready.classList.add('visible');
+  }
+
+  function resetUI() {
+    document.getElementById('terminal').classList.remove('visible');
+    document.getElementById('dl-ready').classList.remove('visible');
+    document.getElementById('log-output').innerHTML = '';
+    hideError();
+    setLoading(false);
+    if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
+  }
+
+  // ── Polling ────────────────────────────────────────────────────────────────
+  let lastLogCount = 0;
+
+  function pollJob(jobId) {
+    lastLogCount = 0;
+    pollingTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/status/${jobId}`);
+        const data = await res.json();
+
+        // Append new log lines
+        const newLines = data.logs.slice(lastLogCount);
+        newLines.forEach(appendLog);
+        lastLogCount = data.logs.length;
+
+        if (data.status === 'done') {
+          clearInterval(pollingTimer);
+          setLoading(false);
+          showDownloadReady(jobId, data.filename);
+        } else if (data.status === 'error') {
+          clearInterval(pollingTimer);
+          setLoading(false);
+          showError('Download failed — check the log above for details.');
+        }
+      } catch (e) {
+        clearInterval(pollingTimer);
+        setLoading(false);
+        showError('Connection error. Please try again.');
+      }
+    }, 1000);
+  }
+
+  // ── Start download ─────────────────────────────────────────────────────────
+  document.getElementById('btn-start').addEventListener('click', async () => {
+    const url = document.getElementById('url-input').value.trim();
+
+    if (!url) { showError('Please paste a video URL first.'); return; }
+    if (!url.startsWith('http')) { showError('URL must start with http:// or https://'); return; }
+
+    resetUI();
+    setLoading(true);
+    showTerminal();
+    appendLog('🚀 Starting job...');
+
+    try {
+      const res = await fetch('/api/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, quality: selectedQuality }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setLoading(false);
+        showError(data.error || 'Server error.');
+        return;
+      }
+
+      currentJobId = data.job_id;
+      pollJob(currentJobId);
+
+    } catch (e) {
+      setLoading(false);
+      showError('Could not reach the server. Is it running?');
+    }
+  });
+
+  // Allow Enter key in input
+  document.getElementById('url-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('btn-start').click();
+  });
+</script>
+</body>
+</html>
